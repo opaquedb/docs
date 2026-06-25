@@ -1,0 +1,7 @@
+# Pinned below mkdocs-material 9.7, which prints an unconditional "MkDocs 2.0"
+# deprecation banner on every build/serve. 9.6.23 is the last 9.6.x release and
+# builds cleanly without the banner.
+mkdocs-material==9.6.23
+# MkDocs 2.0 removes the plugin system and rewrites theming, which breaks the
+# Material theme. Stay on the 1.x line until Material supports 2.0.
+mkdocs<2.0
