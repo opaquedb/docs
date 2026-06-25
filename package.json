@@ -1,0 +1,12 @@
+{
+  "name": "opaquedb-docs",
+  "version": "1.0.0",
+  "description": "Cloudflare Pages deploy tooling for the OpaqueDB documentation site.",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler pages deploy site --project-name opaquedb-docs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.0"
+  }
+}
