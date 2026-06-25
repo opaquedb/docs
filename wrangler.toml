@@ -1,0 +1,5 @@
+# Cloudflare Pages project config. The static site is built into site/ by
+# `mkdocs build`. Set the build command and Python version in the Pages project
+# settings (see README), then Cloudflare serves the contents of this directory.
+name = "opaquedb-docs"
+pages_build_output_dir = "site"
