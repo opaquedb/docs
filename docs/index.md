@@ -1,13 +1,5 @@
 # OpaqueDB
 
-[![GitHub](https://img.shields.io/badge/GitHub-opaquedb%2Fopaquedb-181717?logo=github)](https://github.com/opaquedb/opaquedb)
-[![Stars](https://img.shields.io/github/stars/opaquedb/opaquedb?style=social)](https://github.com/opaquedb/opaquedb/stargazers)
-[![Forks](https://img.shields.io/github/forks/opaquedb/opaquedb?style=social)](https://github.com/opaquedb/opaquedb/network/members)
-[![Issues](https://img.shields.io/github/issues/opaquedb/opaquedb)](https://github.com/opaquedb/opaquedb/issues)
-[![License](https://img.shields.io/github/license/opaquedb/opaquedb)](https://github.com/opaquedb/opaquedb/blob/main/LICENSE)
-
-**Run SQL over encrypted data without revealing the query.**
-
 OpaqueDB answers SQL queries over data without learning what you asked for. A
 client encrypts the value it is searching for under its own key. The server
 evaluates the match over encrypted data and returns an encrypted result that
