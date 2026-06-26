@@ -62,8 +62,3 @@ refuses to start without cluster mTLS or server TLS, unless
 A no-match query returns an encrypted empty result. The backend appends a
 presence ciphertext (the match count); the client reads it first and returns
 nothing at zero. The operator never learns whether a query matched.
-
-## Residual risk
-
-The internal service still shares the public listener. See `SECURITY.md` in the
-main repository for the current statement of residual risk.
