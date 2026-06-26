@@ -41,8 +41,12 @@ opaquedb query 'SELECT country, temperature FROM weather WHERE city = "Tokyo"' \
   --schema examples/weather.sql
 ```
 
-The WHERE clause takes an inline literal (the secret value, encrypted
-client-side) or a bound parameter `:name`.
+The WHERE clause names one searchable column, the primary `KEY` or any secondary
+`INDEX`, and takes an inline literal (the secret value, encrypted client-side) or
+a bound parameter `:name`. A trailing `LIMIT n` and `OFFSET m` are optional and
+public (not encrypted); they page through the decoded matches client-side. The
+default is `LIMIT 1`, and one value can return up to `crypto.result_buckets` rows
+in one query.
 
 ## `repl`
 
@@ -62,9 +66,12 @@ Append one row over the `Insert` RPC. Epochs are immutable, so this copies the
 existing rows, appends the encoded new row, and publishes a new version reusing
 the schema, key_bits, and geometry.
 
+Values are given in schema order (`id city country temperature humidity
+conditions`):
+
 ```sh
 opaquedb insert --table weather --database default \
-  Rome 9 IT 24 55 Clear
+  10 Rome IT 24 55 Clear
 ```
 
 Plaintext today and single-node oriented; it does not advance a global cluster

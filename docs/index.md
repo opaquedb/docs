@@ -23,8 +23,10 @@ linear scan that PIR requires across many machines.
 ## What it is not
 
 - **Not a full SQL engine yet.** Today the evaluated query is
-  `SELECT <cols> FROM <table> WHERE <key> = :param`. Other operators (IN, LIKE,
-  ranges, AND/OR) already parse but are not evaluated under encryption yet.
+  `SELECT <cols> FROM <table> WHERE <col> = :param [LIMIT n] [OFFSET m]`, where
+  `<col>` is the primary `KEY` or any secondary `INDEX` column. One condition per
+  query: other operators (IN, LIKE, ranges) and combining conditions with AND/OR
+  already parse but are not evaluated under encryption yet.
 - **Not a way to skip work.** PIR requires a full linear scan. Sharding improves
   latency and throughput, not total work.
 - **Not anonymity.** Authentication is access control. OpaqueDB hides the query
@@ -36,6 +38,7 @@ linear scan that PIR requires across many machines.
 ## Where to go next
 
 - [Quickstart](quickstart.md): load a table and run a private query.
+- [Use cases](use-cases.md): what to build on private lookups, with schemas.
 - [How it works](how-it-works.md): the bit-sliced matching algorithm and the
   FHE parameters.
 - [Architecture](architecture.md): layering, components, and the libraries used.

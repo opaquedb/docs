@@ -60,5 +60,7 @@ refuses to start without cluster mTLS or server TLS, unless
 ## Empty results
 
 A no-match query returns an encrypted empty result. The backend appends a
-presence ciphertext (the match count); the client reads it first and returns
-nothing at zero. The operator never learns whether a query matched.
+per-bucket presence ciphertext (the match count); the client reads it first and
+returns nothing for a zero-count bucket. The operator never learns whether a
+query matched. Buckets that collide (more than one row of the same key landing in
+one bucket) are dropped client-side and counted, surfaced as a CLI warning.

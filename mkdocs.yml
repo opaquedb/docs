@@ -58,6 +58,7 @@ plugins:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Use cases: use-cases.md
   - How it works: how-it-works.md
   - Architecture: architecture.md
   - Building and development: building.md

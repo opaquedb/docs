@@ -63,6 +63,7 @@ The single source of truth for FHE parameters. See
 | `plain_modulus_bits` | `20` | |
 | `coeff_modulus_bits` | `[60, 60, 60, 60, 60, 49]` | 349 bits. |
 | `key_bits` | `16` | Key universe `2^key_bits`; equality depth `1 + log2`. |
+| `result_buckets` | `16` | `LIMIT`/`OFFSET` result buckets; the most same-key rows returned per page. A power of two, at most `(poly/2)/key_bits`. Set to `1` for single-match collapse (unique keys only). |
 
 ### `[storage]`
 

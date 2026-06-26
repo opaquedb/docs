@@ -6,18 +6,41 @@ parameters that make it fit.
 
 ## The data model
 
-A schema is one `CREATE TABLE name (col TYPE [KEY], ...)`. Types are `INT`,
-`REAL`, and `TEXT`. Exactly one column is the match `KEY` (`INT` or `TEXT`, not
-`REAL`).
+A schema is one `CREATE TABLE name (col TYPE [KEY|INDEX], ...)`. Types are `INT`,
+`REAL`, and `TEXT`. Exactly one column is the primary `KEY`, and any number of
+columns may be marked `INDEX`. A `KEY` or `INDEX` column must be `INT` or `TEXT`,
+not `REAL`.
 
-- The match key maps into a `2^key_bits` universe. `INT` maps directly
-  (range-checked). `TEXT` hashes through a deterministic FNV hash, so a `TEXT`
-  match is a *candidate*: collisions are possible but unlikely, and a larger
-  `key_bits` lowers the rate. Client-side verification of `TEXT` matches is a
-  tracked TODO.
-- Payload columns are returned, not matched. They are packed at ingest (int and
-  real take 8 bytes, text takes a 2-byte length plus bytes) and decoded on the
-  client.
+Each column has one of three roles:
+
+- **Primary key** (`KEY`). The one matched column that also shards the data. It
+  is not stored in payload, so it is matched but not returnable.
+- **Secondary index** (`INDEX`). Searchable like the key, and also stored in
+  payload so it is returned.
+- **Payload** (everything else). Returned, never matched.
+
+A searchable value (the key or an index) maps into a `2^key_bits` universe. `INT`
+maps directly (range-checked). `TEXT` hashes through a deterministic FNV hash, so
+a `TEXT` match is a *candidate*: collisions are possible but unlikely, and a
+larger `key_bits` lowers the rate. Client-side verification of `TEXT` matches is
+a tracked TODO.
+
+Payload columns are packed at ingest (int and real take 8 bytes, text takes a
+2-byte length plus bytes) and decoded on the client. Every searchable column's
+key is packed side by side in one match record,
+`SearchableCount * ceil(key_bits/8)` bytes per row in schema order. A single-key
+table has one searchable column, so its match record is byte-identical to a table
+with no secondary index.
+
+### Querying a secondary index
+
+A query names one searchable column in its `WHERE`. At query time the engine
+slices out that column's sub-key by its position among the searchable columns and
+runs the exact same matcher on it. There is no extra ciphertext multiply and no
+added multiplicative depth, so matching a secondary index costs the same as
+matching the key and reveals no more to the operator. Only one condition per
+query is evaluated; conjunctions (`col1 = a AND col2 = b`) parse but are not yet
+evaluated under encryption.
 
 ## The matching algorithm
 
@@ -40,11 +63,13 @@ batch:
    a doubling masked broadcast spreads the indicator. This uses no plaintext
    multiply, so it spends no noise and causes no cross-block bleed.
 5. **Retrieve.** For each payload plane, a `multiply_plain` by the packed
-   payload, then a block-sum into block 0. Only the matching record's payload
-   survives.
+   payload, then a block-sum that stops at the bucket width
+   (`core::BucketStride`), leaving one partial sum per result bucket. Only
+   matching records' payloads survive, one per bucket.
 
-The two SIMD slot rows are not merged with `rotate_columns`. The matched payload
-lands in block 0 of one row, and the client sums the two row-0 blocks.
+The two SIMD slot rows are not merged with `rotate_columns`. Each bucket's
+payload lands in one row at slot `bucket * stride`, and the client sums the two
+rows' slots for that bucket.
 
 ### Why this is cheap
 
@@ -53,18 +78,51 @@ multiplies per batch (the dominant FHE cost), regardless of how many records the
 batch holds. At `key_bits = 16` that is multiplicative depth 5. The expensive
 multiplies amortize across thousands of rows.
 
+### Multiple results, LIMIT and OFFSET
+
+A single equality can match more than one row, and `LIMIT`/`OFFSET` page through
+those matches. Rows are partitioned into `result_buckets` buckets (default 16, a
+power of two, at most `(poly/2)/key_bits`). The row that is the i-th of its key
+goes to bucket `(Mix(key) + i) % result_buckets`, where `Mix` is a splitmix64
+finalizer. Rows that share a key therefore land in distinct buckets, and
+different keys spread evenly for dense packing.
+
+Placement is purely local and computed at query time, so it changes nothing on
+disk. A bucket collision can only happen between rows of the same key, and
+because sharding is by key every row of a key lives on one shard, so placement is
+deterministic per shard. The matcher always partitions into `result_buckets`
+regardless of the query's `LIMIT`/`OFFSET`; setting `result_buckets = 1` opts
+back into the single-bucket collapse, which is correct only when keys are unique.
+
+All buckets share one ciphertext per plane, so the whole partition rides in one
+result blob and the result size does not grow with `LIMIT`. On the client,
+`crypto::DecryptResults` decodes every bucket. A per-bucket presence count
+separates empty (0) from a clean single match (1) from a collision (>= 2).
+Collided buckets are dropped and counted, and the CLI surfaces the count as a
+warning.
+
+`LIMIT` and `OFFSET` are then applied client-side as a skip and take over the
+decoded clean rows, in bucket order and stable across queries. `LIMIT` counts
+rows, not bucket slots, and `OFFSET` pages through matches. The default is
+`LIMIT 1`, `OFFSET 0`. A key with up to `result_buckets` rows returns all of them
+in one query; raise `result_buckets` to return more.
+
 ### Empty results
 
 A no-match must look the same as a match to the operator. The backend appends a
-"presence" ciphertext, `sum_r b_r`, the match count. On decrypt the client reads
-this first and returns nothing at zero. A no-match is therefore an encrypted
-empty result, and the operator never learns whether a query matched.
+"presence" ciphertext, the per-bucket match count `sum_r b_r`. On decrypt the
+client reads it first and returns nothing for a zero-count bucket. A no-match is
+therefore an encrypted empty result, and the operator never learns whether a
+query matched.
 
 ### Combining shards
 
 In a cluster each shard evaluates its own partial. `CombinePartials` adds the
 shard partials plane-wise. For this to be correct the data must be sharded
-disjoint (consistent hash); replicating the full set would double-count.
+disjoint (consistent hash); replicating the full set would double-count. A
+secondary-index query combines the same way: rows are sharded by the primary key,
+so each row still lives on exactly one shard and the plane-wise sum never
+double-counts.
 
 ## FHE parameters
 

@@ -18,9 +18,11 @@ Any node can be the coordinator; each coordinates equally. The query keys are
 forwarded to every peer when the client registers; peers are reached at
 `server.advertise`, so set it when binding a wildcard.
 
-**Data must be sharded disjoint** with a consistent hash. Replicating the full
-set would double-count in the combine. Use `load --shard-id N --shard-nodes
-a,b,c` to load a single node's shard.
+**Data must be sharded disjoint** by a consistent hash of the primary key.
+Replicating the full set would double-count in the combine. A secondary-index
+query fans out and combines exactly like a key query, because every row still
+lives on one shard. Use `load --shard-id N --shard-nodes a,b,c` to load a single
+node's shard.
 
 ## Coordination with etcd
 
