@@ -2,10 +2,11 @@
 
 OpaqueDB fits any service where the *question* is more sensitive than the
 *answer*. The operator runs a lookup over its own data and returns a result, but
-never learns the value you searched for. Each design below maps onto the one
-query OpaqueDB evaluates today: a private equality lookup on a key column,
-`SELECT <cols> FROM <table> WHERE <key> = :param`, optionally paged with
-`LIMIT`/`OFFSET`.
+never learns the value you searched for. Each design below maps onto a private
+lookup on a searchable column: `SELECT <cols> FROM <table> WHERE <col> = :param`,
+where `<col>` is the primary `KEY` or any secondary `INDEX`. The same column also
+supports `<>`, `IN (...)`, `COUNT(*)`, and `LIMIT`/`OFFSET` paging. See the
+[SQL reference](sql.md) for the full set.
 
 Keep the trust model in mind (see [Security](security.md)). OpaqueDB hides the
 query value, not the fact that you connected. The operator still learns which
@@ -34,9 +35,10 @@ CREATE TABLE forecast (
 ```
 
 ```console
-$ opaquedb query 'SELECT temperature, conditions FROM forecast WHERE geohash = "u173zy"' \
-    --schema forecast.sql
-temperature=8 conditions=Drizzle
+$ opaquedb query 'SELECT temperature, conditions FROM forecast WHERE geohash = "u173zy"'
+ temperature | conditions
+-------------+------------
+ 8           | Drizzle
 ```
 
 The geohash never leaves the client in the clear. Geohash length is a
@@ -68,7 +70,7 @@ CREATE TABLE mailbox (
 
 ```console
 $ opaquedb query 'SELECT seq, ciphertext FROM mailbox WHERE channel = :id LIMIT 50' \
-    --schema mailbox.sql
+    --param id=<channel-token>
 ```
 
 `LIMIT` and `OFFSET` page through a backlog of messages in one query. This hides
@@ -100,9 +102,10 @@ CREATE TABLE iocs (
 ```
 
 ```console
-$ opaquedb query 'SELECT verdict, family FROM iocs WHERE indicator = "<sha256>"' \
-    --schema iocs.sql
-verdict=malicious family=LockBit
+$ opaquedb query 'SELECT verdict, family FROM iocs WHERE indicator = "<sha256>"'
+ verdict   | family
+-----------+---------
+ malicious | LockBit
 ```
 
 The same shape covers searching a leaked-credential or breach corpus for your
@@ -125,11 +128,11 @@ intelligence vendor.
 These designs share a few constraints from [How it works](how-it-works.md):
 
 - **Searchable columns.** Each table has exactly one primary `KEY` and may add
-  any number of secondary `INDEX` columns. A query matches on whichever column
-  its `WHERE` names, one condition per query. Make every value you need to look
-  up privately the `KEY` or an `INDEX`; the rest is returned payload. The primary
-  key is matched but not stored in payload, so it cannot be projected back; an
-  `INDEX` column is both searchable and returned.
+  any number of secondary `INDEX` columns. A query matches on whichever single
+  column its `WHERE` names. Make every value you need to look up privately the
+  `KEY` or an `INDEX`; the rest is returned payload. The primary key is matched
+  but not stored in payload, so it cannot be projected back; an `INDEX` column is
+  both searchable and returned.
 - **TEXT keys are candidate matches.** A `TEXT` key is hashed into the
   `2^key_bits` universe (default `key_bits = 16`), so matches can collide. For
   high-cardinality keys such as hashes or ids, raise `key_bits` and verify the

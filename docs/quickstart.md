@@ -8,9 +8,9 @@ private query. It assumes you have built the `opaquedb` binary. See
 
 A schema is one `CREATE TABLE`. Exactly one column is the primary `KEY` (it is
 searchable and shards the data). Any column may also be marked `INDEX` to make it
-searchable too. A `KEY` or `INDEX` column must be `INT` or `TEXT`, not `REAL`.
-The remaining columns are typed payload (`INT`, `REAL`, `TEXT`) that is returned
-but not matched.
+searchable too. A `KEY` or `INDEX` column must be `INT` or `TEXT`. The remaining
+columns are typed payload (`INT`, `REAL`, `TEXT`, `JSON`) that is returned but
+not matched.
 
 ```sql
 -- weather.sql
@@ -27,7 +27,8 @@ CREATE TABLE weather (
 A query matches on whichever column its `WHERE` names, so this table can be
 looked up by `id`, `city`, `country`, or `conditions`. An `INDEX` column is
 stored both as a search key and as payload, so it is also returned; the `KEY`
-column is the one exception, matched but not returned.
+column is the one exception, matched but not returned. For the full column rules
+and query syntax, see the [SQL reference](sql.md).
 
 The CSV header names the columns:
 
@@ -55,19 +56,26 @@ opaquedb run --set auth.mode=none --set auth.enable_insecure=true &
 opaquedb load --schema examples/weather.sql --csv examples/weather.csv
 ```
 
+Only `load` takes `--schema`; it is the DDL that defines the table. The `query`
+and `repl` commands fetch the schema from the node, so they do not need it.
+
 ## 3. Run private queries
 
 Open the interactive shell and query by any searchable column, the primary `KEY`
-or any `INDEX`:
+or any `INDEX`. Statements end with a semicolon and may span lines.
 
 ```console
-$ opaquedb repl --schema examples/weather.sql
+$ opaquedb repl
 OpaqueDB shell. \help for commands, \quit to exit.
-opaquedb(default)> SELECT city, temperature, conditions FROM weather WHERE id = 1
-city=Amsterdam temperature=18 conditions=Cloudy
-opaquedb(default)> SELECT city, temperature FROM weather WHERE country = "JP"
-city=Tokyo temperature=27
-opaquedb(default)> SELECT country FROM weather WHERE city = "Atlantis"
+opaquedb(default)> SELECT city, temperature, conditions FROM weather WHERE id = 1;
+ city      | temperature | conditions
+-----------+-------------+------------
+ Amsterdam | 18          | Cloudy
+opaquedb(default)> SELECT city FROM weather WHERE country = "JP";
+ city
+-------
+ Tokyo
+opaquedb(default)> SELECT country FROM weather WHERE city = "Atlantis";
 (no rows)
 opaquedb(default)> \quit
 ```
@@ -75,9 +83,10 @@ opaquedb(default)> \quit
 A one-shot query works the same way:
 
 ```console
-$ opaquedb query 'SELECT country, temperature, conditions FROM weather WHERE city = "Amsterdam"' \
-    --schema examples/weather.sql
-country=NL temperature=18 conditions=Cloudy
+$ opaquedb query 'SELECT country, temperature, conditions FROM weather WHERE city = "Amsterdam"'
+ country | temperature | conditions
+---------+-------------+------------
+ NL      | 18          | Cloudy
 ```
 
 `"Amsterdam"` is encrypted before it leaves the client. The node scans every row
@@ -87,24 +96,63 @@ The value is encrypted whichever column you match on, so a query on a secondary
 `INDEX` reveals no more to the operator and takes the same encrypted round trip
 as a query on the key.
 
-A searchable value can match several rows. `LIMIT` and `OFFSET` page through them;
-the default is `LIMIT 1`. Two cities share `conditions = "Sunny"`, and `LIMIT`
-returns both in one query:
+## 4. More than one match
+
+A searchable value can match several rows. The default is `LIMIT 10`, so a bare
+query returns up to ten matches. Two cities share `conditions = "Sunny"`, and
+both come back:
 
 ```console
-$ opaquedb query 'SELECT city, country, temperature FROM weather WHERE conditions = "Sunny" LIMIT 5' \
-    --schema examples/weather.sql
-city=Nairobi country=KE temperature=24
-city=Cairo country=EG temperature=33
+$ opaquedb query 'SELECT city, country FROM weather WHERE conditions = "Sunny"'
+ city    | country
+---------+---------
+ Nairobi | KE
+ Cairo   | EG
 ```
 
-`LIMIT` and `OFFSET` are public and applied client-side over the decoded matches.
-See [How it works](how-it-works.md#multiple-results-limit-and-offset) for the
-buckets that carry them.
+`LIMIT n` caps the rows and `OFFSET m` pages through them in a stable order:
+
+```console
+$ opaquedb query 'SELECT city, country FROM weather WHERE conditions = "Sunny" LIMIT 1 OFFSET 1'
+ city  | country
+-------+---------
+ Cairo | EG
+```
+
+## 5. Beyond equality
+
+The engine also matches a set of values, excludes a value, and counts privately.
+Each value is encrypted, so the operator learns nothing about any of them.
+
+```console
+$ opaquedb query 'SELECT city, temperature FROM weather WHERE city IN ("Tokyo", "Cairo")'
+ city  | temperature
+-------+-------------
+ Tokyo | 27
+ Cairo | 33
+
+$ opaquedb query 'SELECT COUNT(*) FROM weather WHERE conditions <> "Sunny"'
+7
+```
+
+A `SELECT` with no `WHERE` is a plaintext scan (there is no value to hide), with
+client-side `ORDER BY`, `DISTINCT`, and aliases:
+
+```console
+$ opaquedb query 'SELECT DISTINCT country FROM weather ORDER BY country LIMIT 3'
+ country
+---------
+ CA
+ CL
+ EG
+```
+
+See the [SQL reference](sql.md) for every supported form and the exact boundary
+of what runs under encryption.
 
 ## How a literal is handled
 
-A WHERE clause takes either a bound parameter (`:name`) or an inline literal
+A `WHERE` clause takes either a bound parameter (`:name`) or an inline literal
 (`= "London"`). An inline literal is the secret value, so it is client-side
 sugar: the client lifts it out, encrypts it, and rewrites the query to `:v`. The
 server rejects any literal, so the operator only ever sees the parameterized
@@ -112,6 +160,7 @@ template.
 
 ## Next
 
+- [SQL reference](sql.md) for the full query syntax.
 - [How it works](how-it-works.md) for the matching algorithm.
 - [CLI reference](cli.md) for every command and flag.
 - [Cluster](cluster.md) to run a sharded multi-node setup.

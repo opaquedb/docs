@@ -7,9 +7,11 @@ parameters that make it fit.
 ## The data model
 
 A schema is one `CREATE TABLE name (col TYPE [KEY|INDEX], ...)`. Types are `INT`,
-`REAL`, and `TEXT`. Exactly one column is the primary `KEY`, and any number of
-columns may be marked `INDEX`. A `KEY` or `INDEX` column must be `INT` or `TEXT`,
-not `REAL`.
+`REAL`, `TEXT`, and `JSON`. Exactly one column is the primary `KEY`, and any
+number of columns may be marked `INDEX`. A `KEY` or `INDEX` column must be `INT`
+or `TEXT`, not `REAL` or `JSON`. A `JSON` column is stored and returned just like
+`TEXT`, but its value is validated as well-formed JSON on insert, so a client
+gets back parseable JSON rather than an opaque string.
 
 Each column has one of three roles:
 
@@ -38,9 +40,9 @@ A query names one searchable column in its `WHERE`. At query time the engine
 slices out that column's sub-key by its position among the searchable columns and
 runs the exact same matcher on it. There is no extra ciphertext multiply and no
 added multiplicative depth, so matching a secondary index costs the same as
-matching the key and reveals no more to the operator. Only one condition per
-query is evaluated; conjunctions (`col1 = a AND col2 = b`) parse but are not yet
-evaluated under encryption.
+matching the key and reveals no more to the operator. One searchable column per
+query is evaluated; cross-column conjunctions (`col1 = a AND col2 = b`) parse but
+are not yet evaluated under encryption.
 
 ## The matching algorithm
 
@@ -78,6 +80,23 @@ multiplies per batch (the dominant FHE cost), regardless of how many records the
 batch holds. At `key_bits = 16` that is multiplicative depth 5. The expensive
 multiplies amortize across thousands of rows.
 
+### Inequality, IN, and same-column OR
+
+`<>` (`!=`) reuses the whole pipeline. Right after the block mask, when the
+selector holds the equality indicator at occupied record starts, the matcher
+computes `ne = mask - eq`, which is `1 - eq` at occupied starts and 0 elsewhere.
+That is plaintext arithmetic on an already-final ciphertext, so `<>` adds **no**
+multiplicative depth and costs exactly what `=` costs.
+
+`IN (...)` and a same-column `OR` match a set of values on one column. The query
+carries a primary operand plus one extra operand per listed value, each its own
+ciphertext. The matcher builds one equality indicator per operand and **sums**
+them. A key equals at most one listed value, so the indicators are disjoint and
+the sum is their union. The operand list is de-duplicated on the client first: a
+repeated value would make a matching row's indicator 2 and drop it as a false
+collision. Each extra value adds one square plus AND-tree, not a deeper circuit,
+so the multiplicative depth stays the same as a single equality.
+
 ### Multiple results, LIMIT and OFFSET
 
 A single equality can match more than one row, and `LIMIT`/`OFFSET` page through
@@ -104,8 +123,9 @@ warning.
 `LIMIT` and `OFFSET` are then applied client-side as a skip and take over the
 decoded clean rows, in bucket order and stable across queries. `LIMIT` counts
 rows, not bucket slots, and `OFFSET` pages through matches. The default is
-`LIMIT 1`, `OFFSET 0`. A key with up to `result_buckets` rows returns all of them
-in one query; raise `result_buckets` to return more.
+`LIMIT 10`, `OFFSET 0`, still bounded by `result_buckets`. A key with up to
+`result_buckets` rows returns all of them in one query; raise `result_buckets` to
+return more.
 
 ### Empty results
 
@@ -114,6 +134,11 @@ A no-match must look the same as a match to the operator. The backend appends a
 client reads it first and returns nothing for a zero-count bucket. A no-match is
 therefore an encrypted empty result, and the operator never learns whether a
 query matched.
+
+`SELECT COUNT(*)` reuses this presence count: the client sums it across buckets
+and returns the single number. The count is exact even when rows collide in a
+bucket, because a collision still adds its rows to the presence sum even though
+the colliding payloads are dropped from the returned rows.
 
 ### Combining shards
 

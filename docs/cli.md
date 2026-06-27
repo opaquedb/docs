@@ -18,7 +18,8 @@ opaquedb run --set auth.mode=none --set auth.enable_insecure=true   # local dev
 
 ## `load`
 
-Ingest a schema and a CSV. The CSV header names the columns.
+Ingest a schema and a CSV. The CSV header names the columns. This is the only
+command that takes `--schema`; it is the DDL that defines the table.
 
 ```sh
 opaquedb load --schema examples/weather.sql --csv examples/weather.csv
@@ -34,31 +35,59 @@ opaquedb load --schema weather.sql --csv weather.csv \
 
 ## `query`
 
-Run one private SELECT and print the decoded row.
+Run one `SELECT` and print the decoded rows. A `WHERE` query matches privately; a
+query with no `WHERE` is a plaintext scan.
 
 ```sh
-opaquedb query 'SELECT country, temperature FROM weather WHERE city = "Tokyo"' \
-  --schema examples/weather.sql
+opaquedb query 'SELECT country, temperature FROM weather WHERE city = "Tokyo"'
 ```
 
-The WHERE clause names one searchable column, the primary `KEY` or any secondary
-`INDEX`, and takes an inline literal (the secret value, encrypted client-side) or
-a bound parameter `:name`. A trailing `LIMIT n` and `OFFSET m` are optional and
-public (not encrypted); they page through the decoded matches client-side. The
-default is `LIMIT 1`, and one value can return up to `crypto.result_buckets` rows
-in one query.
+The client fetches the table schema from the node (the `DescribeTable` RPC) and
+decodes rows from it, so `query` does not take `--schema`. The full query syntax,
+including `<>`, `IN`, `COUNT(*)`, `LIMIT`/`OFFSET`, `ORDER BY`, and `DISTINCT`, is
+in the [SQL reference](sql.md).
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--param name=value` | | Bind a `:name` parameter. Repeatable. |
+| `--database D` | `default` | The database to query. |
+| `--target host:port` | from config | The node to dial. |
+| `--client-id ID` | `dev` | Client id used to register keys. |
+| `--backend NAME` | | Backend hint. |
+| `--token T` | | Bearer token for token auth mode. |
+
+```sh
+opaquedb query 'SELECT country FROM weather WHERE city = :c' --param c=Amsterdam
+```
 
 ## `repl`
 
-Interactive shell with line editing and tab completion. Registers keys once,
-then runs each SELECT privately.
+Interactive shell with line editing and tab completion. Registers keys once, then
+runs each statement. Statements end with a semicolon and may span lines. Up and
+down recall history (saved to `$OPAQUEDB_HISTORY` or `~/.opaquedb_history`), and
+tab completes keywords plus known table and column names.
 
 ```console
-$ opaquedb repl --schema examples/weather.sql
-opaquedb(default)> SELECT country FROM weather WHERE city = "Amsterdam"
+$ opaquedb repl
+OpaqueDB shell. \help for commands, \quit to exit.
+opaquedb(default)> SELECT country FROM weather WHERE city = "Amsterdam";
+ country
+---------
+ NL
 ```
 
-Meta-commands: `\use <db>`, `\schema <file>`, `\tables`, `\help`, `\quit`.
+Meta-commands:
+
+| Command | Does |
+| --- | --- |
+| `\use <database>` | Switch the current database. |
+| `\tables` | List tables in the current database. |
+| `\d <table>` | Show a table's columns. |
+| `\timing` | Toggle query timing on or off. |
+| `\help` (`\h`) | Show the command list. |
+| `\quit` (`\q`) | Exit. |
+
+Flags: `--target`, `--client-id` (default `repl`), `--token`, `--database`.
 
 ## `insert`
 
@@ -76,6 +105,18 @@ opaquedb insert --table weather --database default \
 
 Plaintext today and single-node oriented; it does not advance a global cluster
 epoch (tracked TODO).
+
+## `token`
+
+Provision auth tokens for token mode.
+
+```sh
+opaquedb token mint --id analyst --role query
+opaquedb token mint --id ops --role admin --bytes 32
+```
+
+`mint` prints one `id role token` line of a `/dev/urandom` token. Roles are
+`query` or `admin`.
 
 ## `config`
 
